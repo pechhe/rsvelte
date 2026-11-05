@@ -3695,8 +3695,16 @@ fn build_companion_augment(
     tsx_path: &Path,
     companion: &Path,
 ) -> CompanionAugment {
+    // A `lang="ts"` shadow is plain TypeScript (see `TS_SHADOW_EXTENSION`):
+    // parsed as TSX, a generic arrow function or `<T>x` assertion in its script
+    // would fail and the module's exports would be lost.
+    let shadow_source_type = if tsx_path.to_string_lossy().ends_with(TS_SHADOW_EXTENSION) {
+        SourceType::ts()
+    } else {
+        SourceType::tsx()
+    };
     let shadow = fs::read_to_string(tsx_path)
-        .map(|src| module_exports(&src, SourceType::tsx()))
+        .map(|src| module_exports(&src, shadow_source_type))
         .unwrap_or_default();
     let companion_source_type = if companion.extension().and_then(|e| e.to_str()) == Some("ts") {
         SourceType::ts()
@@ -6104,6 +6112,32 @@ mod tests {
         assert!(
             target.ends_with("Card.svelte.shadow.ts"),
             "override does not point at the shadow: {target}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn companion_augment_reads_the_exports_of_a_shadow_with_a_generic_arrow() {
+        // The shadow is plain TypeScript; parsed as TSX the generic arrow below
+        // is a syntax error and the module's exports would be lost.
+        let tmp = std::env::temp_dir().join(format!("svc_augment_generic_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let shadow = tmp.join("Tip.svelte.shadow.ts");
+        fs::write(
+            &shadow,
+            "export const helper = <T>(x: T): T => x;\nexport default function Tip() {}\n",
+        )
+        .unwrap();
+        let companion = tmp.join("Tip.svelte.ts");
+        fs::write(&companion, "export const tip = 1;\n").unwrap();
+
+        let augment = build_companion_augment(&tmp.join("Tip.svelte"), &shadow, &companion);
+        assert!(
+            augment.names.iter().any(|n| n == "helper"),
+            "the generic arrow export was lost: {:?}",
+            augment.names
         );
 
         let _ = fs::remove_dir_all(&tmp);
