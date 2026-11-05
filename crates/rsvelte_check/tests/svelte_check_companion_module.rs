@@ -149,7 +149,8 @@ fn nested_companion_specifier_path_is_correct() {
     // Shadow lives at <emit>/src/lib/User.svelte.tsx; the real companion is at
     // <ws>/src/lib/Tip.svelte.ts → up out of `.svelte-check/svelte` (2 levels)
     // then back down the mirrored subpath.
-    let tsx = fs::read_to_string(ws.join(".svelte-check/svelte/src/lib/User.svelte.shadow.ts")).unwrap();
+    let tsx =
+        fs::read_to_string(ws.join(".svelte-check/svelte/src/lib/User.svelte.shadow.ts")).unwrap();
     assert!(
         tsx.contains("'../../../../src/lib/Tip.svelte.js'"),
         "nested companion specifier path wrong:\n{tsx}"

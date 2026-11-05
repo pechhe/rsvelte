@@ -192,8 +192,8 @@ fn external_package_self_referential_alias_import_is_rewritten_to_its_own_shadow
     let layout = result.overlay.expect("overlay should be materialised");
     let ext_root = layout.cache_dir.join("ext");
 
-    let selection_menu_tsx =
-        find_shadow(&ext_root, "selection-menu.svelte.shadow.ts").unwrap_or_else(|| {
+    let selection_menu_tsx = find_shadow(&ext_root, "selection-menu.svelte.shadow.ts")
+        .unwrap_or_else(|| {
             panic!(
                 "no external selection-menu.svelte.tsx under {}",
                 ext_root.display()
@@ -268,7 +268,8 @@ fn bare_deep_specifier_is_rewritten_under_a_relative_workspace() {
 
     result.overlay.expect("overlay should be materialised");
     // `emit_dir` is relative to the (now restored) CWD, so re-anchor on `a`.
-    let deep_tsx = fs::read_to_string(a.join(".svelte-check/svelte/src/deep.svelte.shadow.ts")).unwrap();
+    let deep_tsx =
+        fs::read_to_string(a.join(".svelte-check/svelte/src/deep.svelte.shadow.ts")).unwrap();
     assert!(
         !deep_tsx.contains("'libs/components/survey-options.svelte'"),
         "bare deep specifier was not rewritten:\n{deep_tsx}"
@@ -327,7 +328,8 @@ fn relative_workspace_leaves_a_within_workspace_import_unrewritten() {
     result.overlay.expect("overlay should be materialised");
     // `emit_dir` is relative to the (now restored) CWD, so re-anchor on `root`.
     let deep_tsx_relative =
-        fs::read_to_string(root.join(".svelte-check/svelte/src/a/b/Deep.svelte.shadow.ts")).unwrap();
+        fs::read_to_string(root.join(".svelte-check/svelte/src/a/b/Deep.svelte.shadow.ts"))
+            .unwrap();
     assert!(
         deep_tsx_relative.contains("'../../util'"),
         "an import resolving inside the workspace must be left unrewritten under a relative `--workspace .`:\n{deep_tsx_relative}"
@@ -344,7 +346,8 @@ fn relative_workspace_leaves_a_within_workspace_import_unrewritten() {
     });
     result_abs.overlay.expect("overlay should be materialised");
     let deep_tsx_abs =
-        fs::read_to_string(root_abs.join(".svelte-check/svelte/src/a/b/Deep.svelte.shadow.ts")).unwrap();
+        fs::read_to_string(root_abs.join(".svelte-check/svelte/src/a/b/Deep.svelte.shadow.ts"))
+            .unwrap();
     assert!(
         deep_tsx_abs.contains("'../../util'"),
         "sanity: absolute workspace must also leave the within-workspace import unrewritten:\n{deep_tsx_abs}"
