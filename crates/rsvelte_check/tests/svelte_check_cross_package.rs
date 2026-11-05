@@ -102,7 +102,7 @@ fn cross_package_svelte_gets_shadow_and_rootdirs_bridge() {
     let ext_root = layout.cache_dir.join("ext");
 
     // 1. A shadow .tsx + .d.ts were emitted for the sibling's Sidebar.svelte.
-    let tsx = find_shadow(&ext_root, "Sidebar.svelte.tsx").unwrap_or_else(|| {
+    let tsx = find_shadow(&ext_root, "Sidebar.svelte.shadow.ts").unwrap_or_else(|| {
         panic!(
             "no external Sidebar.svelte.tsx under {}",
             ext_root.display()
@@ -193,7 +193,7 @@ fn external_package_self_referential_alias_import_is_rewritten_to_its_own_shadow
     let ext_root = layout.cache_dir.join("ext");
 
     let selection_menu_tsx =
-        find_shadow(&ext_root, "selection-menu.svelte.tsx").unwrap_or_else(|| {
+        find_shadow(&ext_root, "selection-menu.svelte.shadow.ts").unwrap_or_else(|| {
             panic!(
                 "no external selection-menu.svelte.tsx under {}",
                 ext_root.display()
@@ -205,7 +205,7 @@ fn external_package_self_referential_alias_import_is_rewritten_to_its_own_shadow
         "self-referential alias import should have been rewritten to a relative shadow path:\n{tsx_code}"
     );
     assert!(
-        tsx_code.contains("input.svelte.tsx"),
+        tsx_code.contains("input.svelte.shadow.ts"),
         "rewritten specifier should still point at Input's own shadow:\n{tsx_code}"
     );
 }
@@ -268,13 +268,13 @@ fn bare_deep_specifier_is_rewritten_under_a_relative_workspace() {
 
     result.overlay.expect("overlay should be materialised");
     // `emit_dir` is relative to the (now restored) CWD, so re-anchor on `a`.
-    let deep_tsx = fs::read_to_string(a.join(".svelte-check/svelte/src/deep.svelte.tsx")).unwrap();
+    let deep_tsx = fs::read_to_string(a.join(".svelte-check/svelte/src/deep.svelte.shadow.ts")).unwrap();
     assert!(
         !deep_tsx.contains("'libs/components/survey-options.svelte'"),
         "bare deep specifier was not rewritten:\n{deep_tsx}"
     );
     assert!(
-        deep_tsx.contains("ext/0/src/components/survey-options.svelte.tsx"),
+        deep_tsx.contains("ext/0/src/components/survey-options.svelte.shadow.ts"),
         "bare deep specifier should point at the sibling's mirror shadow:\n{deep_tsx}"
     );
 }
@@ -327,7 +327,7 @@ fn relative_workspace_leaves_a_within_workspace_import_unrewritten() {
     result.overlay.expect("overlay should be materialised");
     // `emit_dir` is relative to the (now restored) CWD, so re-anchor on `root`.
     let deep_tsx_relative =
-        fs::read_to_string(root.join(".svelte-check/svelte/src/a/b/Deep.svelte.tsx")).unwrap();
+        fs::read_to_string(root.join(".svelte-check/svelte/src/a/b/Deep.svelte.shadow.ts")).unwrap();
     assert!(
         deep_tsx_relative.contains("'../../util'"),
         "an import resolving inside the workspace must be left unrewritten under a relative `--workspace .`:\n{deep_tsx_relative}"
@@ -344,7 +344,7 @@ fn relative_workspace_leaves_a_within_workspace_import_unrewritten() {
     });
     result_abs.overlay.expect("overlay should be materialised");
     let deep_tsx_abs =
-        fs::read_to_string(root_abs.join(".svelte-check/svelte/src/a/b/Deep.svelte.tsx")).unwrap();
+        fs::read_to_string(root_abs.join(".svelte-check/svelte/src/a/b/Deep.svelte.shadow.ts")).unwrap();
     assert!(
         deep_tsx_abs.contains("'../../util'"),
         "sanity: absolute workspace must also leave the within-workspace import unrewritten:\n{deep_tsx_abs}"
@@ -442,7 +442,7 @@ fn external_package_alias_is_never_repointed_at_the_consumers_own_component() {
         ..RunOptions::default()
     });
     let layout = result.overlay.expect("overlay should be materialised");
-    let menu = find_shadow(&layout.cache_dir.join("ext"), "menu.svelte.tsx")
+    let menu = find_shadow(&layout.cache_dir.join("ext"), "menu.svelte.shadow.ts")
         .expect("external menu.svelte shadow");
     let code = fs::read_to_string(&menu).unwrap();
     let import_line = code
@@ -454,7 +454,7 @@ fn external_package_alias_is_never_repointed_at_the_consumers_own_component() {
         "package B's own $lib import was repointed at package A's component:\n{import_line}"
     );
     assert!(
-        import_line.contains("input.svelte.tsx"),
+        import_line.contains("input.svelte.shadow.ts"),
         "package B's own $lib import should resolve to its own shadow:\n{import_line}"
     );
 }
@@ -516,7 +516,7 @@ fn external_package_alias_it_cannot_resolve_itself_is_left_alone() {
         ..RunOptions::default()
     });
     let layout = result.overlay.expect("overlay should be materialised");
-    let menu = find_shadow(&layout.cache_dir.join("ext"), "menu.svelte.tsx")
+    let menu = find_shadow(&layout.cache_dir.join("ext"), "menu.svelte.shadow.ts")
         .expect("external menu.svelte shadow");
     let code = fs::read_to_string(&menu).unwrap();
     let import_line = code

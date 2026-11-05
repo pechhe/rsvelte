@@ -6,7 +6,7 @@
 //! `Foo.svelte.ts` (or `.js`) collide on the same TypeScript basename:
 //! `import X from './Foo.svelte'` and `import { y } from './Foo.svelte.js'`
 //! both resolve to the single `Foo.svelte.{ts,tsx,d.ts}` family. The overlay
-//! emits the component shadow as `Foo.svelte.tsx`; without special handling a
+//! emits the component shadow as `Foo.svelte.shadow.ts`; without special handling a
 //! companion's named exports (`{ y }`) are invisible — TS reports a spurious
 //! `TS2614: has no exported member 'y'`.
 //!
@@ -47,7 +47,7 @@ fn component_shadow_keeps_the_sibling_ts_companion_out() {
     let files = vec![ws.join("Tip.svelte")];
     materialize_overlay(&ws, &files, None).expect("overlay");
 
-    let tsx = read_tsx(&ws, "Tip.svelte.tsx");
+    let tsx = read_tsx(&ws, "Tip.svelte.shadow.ts");
     // Default export (the component) is preserved …
     assert!(
         tsx.contains("export default Tip__SvelteComponent_;"),
@@ -78,7 +78,7 @@ fn companion_specifier_is_repointed_at_the_real_module() {
     let files = vec![ws.join("Tip.svelte"), ws.join("User.svelte")];
     materialize_overlay(&ws, &files, None).expect("overlay");
 
-    let tsx = read_tsx(&ws, "User.svelte.tsx");
+    let tsx = read_tsx(&ws, "User.svelte.shadow.ts");
     assert!(
         tsx.contains("'../../Tip.svelte.js'"),
         "companion specifier not repointed at the real module:\n{tsx}"
@@ -99,7 +99,7 @@ fn a_js_companion_specifier_is_repointed_too() {
     let files = vec![ws.join("Tip.svelte"), ws.join("User.svelte")];
     materialize_overlay(&ws, &files, None).expect("overlay");
 
-    let tsx = read_tsx(&ws, "User.svelte.tsx");
+    let tsx = read_tsx(&ws, "User.svelte.shadow.ts");
     assert!(
         tsx.contains("'../../Tip.svelte.js'"),
         "js companion specifier not repointed:\n{tsx}"
@@ -121,7 +121,7 @@ fn a_rune_module_specifier_is_left_alone() {
     let files = vec![ws.join("User.svelte")];
     materialize_overlay(&ws, &files, None).expect("overlay");
 
-    let tsx = read_tsx(&ws, "User.svelte.tsx");
+    let tsx = read_tsx(&ws, "User.svelte.shadow.ts");
     assert!(
         tsx.contains("'./state.svelte.js'"),
         "a companion-less rune module specifier was rewritten:\n{tsx}"
@@ -149,7 +149,7 @@ fn nested_companion_specifier_path_is_correct() {
     // Shadow lives at <emit>/src/lib/User.svelte.tsx; the real companion is at
     // <ws>/src/lib/Tip.svelte.ts → up out of `.svelte-check/svelte` (2 levels)
     // then back down the mirrored subpath.
-    let tsx = fs::read_to_string(ws.join(".svelte-check/svelte/src/lib/User.svelte.tsx")).unwrap();
+    let tsx = fs::read_to_string(ws.join(".svelte-check/svelte/src/lib/User.svelte.shadow.ts")).unwrap();
     assert!(
         tsx.contains("'../../../../src/lib/Tip.svelte.js'"),
         "nested companion specifier path wrong:\n{tsx}"

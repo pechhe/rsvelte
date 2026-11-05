@@ -29,6 +29,6 @@ fn overlay_materializes_a_bind_on_a_multibyte_identifier() {
     let files = vec![ws.join("Astral.svelte")];
     materialize_overlay(&ws, &files, None).expect("overlay");
 
-    let tsx = fs::read_to_string(ws.join(".svelte-check/svelte/Astral.svelte.tsx")).unwrap();
+    let tsx = fs::read_to_string(ws.join(".svelte-check/svelte/Astral.svelte.shadow.ts")).unwrap();
     assert!(tsx.contains('値'), "shadow missing the binding:\n{tsx}");
 }

@@ -252,7 +252,7 @@ pub fn map_tsgo_diagnostics(
     // tsc emits paths relative to its cwd (= workspace), so we key on
     // (a) the absolute tsx_path, (b) its canonicalised form, and
     // (c) the path relative to workspace — that last one is what shows
-    // up in raw diagnostics like `.svelte-check/svelte/Foo.svelte.tsx`.
+    // up in raw diagnostics like `.svelte-check/svelte/Foo.svelte.shadow.ts`.
     let mut by_tsx: HashMap<PathBuf, &OverlayEntry> = HashMap::new();
     for entry in &overlay.entries {
         let canon = entry

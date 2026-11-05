@@ -1,16 +1,16 @@
 //! Overlay-directory manager.
 //!
-//! Materialises `.tsx` shadow files for each
-//! `.svelte` source so a TypeScript compiler (tsgo / tsc) can consume
-//! them. Mirrors the `emitSvelteFiles` + `writeOverlayTsconfig`
+//! Materialises TypeScript shadow files (`Foo.svelte.shadow.ts`, or `.jsx` for
+//! a JavaScript component) for each `.svelte` source so a TypeScript compiler
+//! (tsgo / tsc) can consume them. Mirrors the `emitSvelteFiles` + `writeOverlayTsconfig`
 //! choreography in
 //! `submodules/language-tools/packages/svelte-check/src/incremental.ts`.
 //!
 //! Implementation choices for v0.2:
 //! - Cache dir is `<workspace>/.svelte-check/`. v0.3 will swap this to
 //!   `.svelte-kit/` when the workspace looks like a `SvelteKit` project.
-//! - `.svelte` → `<cacheDir>/svelte/<rel>.svelte.tsx` plus a
-//!   sibling `<rel>.svelte.d.ts` re-exporting the `.tsx`'s default and
+//! - `.svelte` → `<cacheDir>/svelte/<rel>.svelte.shadow.ts` plus a
+//!   sibling `<rel>.svelte.d.ts` re-exporting the shadow's default and
 //!   named exports (so import-by-name still resolves), and a
 //!   `<rel>.d.svelte.ts` twin of it (see `write_esm_bridge`).
 //! - The emitted overlay tsconfig EXTENDS the original tsconfig.json
@@ -674,7 +674,7 @@ pub fn materialize_overlay_with(
                 (Some((mtime, size)), Some(entry))
                     if incremental && entry.mtime_ms == mtime && entry.size == size =>
                 {
-                    ".tsx"
+                    TS_SHADOW_EXTENSION
                 }
                 _ => match fs::read_to_string(abs_source) {
                     Ok(text) => {
@@ -684,7 +684,7 @@ pub fn materialize_overlay_with(
                     }
                     // An unreadable source produces what the caller would have
                     // produced anyway; the emit branch below reports the error.
-                    Err(_) => ".tsx",
+                    Err(_) => TS_SHADOW_EXTENSION,
                 },
             };
             let is_js_shadow = ext == ".jsx";
@@ -703,7 +703,7 @@ pub fn materialize_overlay_with(
             // `allowJs` is on whenever a `.jsx` shadow exists, so CJS-mode
             // resolution of `./X.svelte` finds the shadow itself, and ESM mode
             // still goes through the `.d.svelte.ts` bridge.
-            let emit_dts_twin = ext == ".tsx";
+            let emit_dts_twin = ext == TS_SHADOW_EXTENSION;
             if let Some(parent) = tsx_path.parent() {
                 reject_symlink_components(parent, &cache_dir)?;
                 fs::create_dir_all(parent)?;
@@ -1398,7 +1398,7 @@ fn emit_external_shadows(
         // See the twin's comment in `materialize_overlay_with`: next to a
         // `.jsx` shadow this file IS its declaration counterpart, so writing
         // it makes the shadow resolve to itself.
-        if ext == ".tsx" {
+        if ext == TS_SHADOW_EXTENSION {
             fs::write(&dts_path, &dts_content)?;
         } else {
             let _ = fs::remove_file(&dts_path);
@@ -1727,8 +1727,23 @@ fn safe_relative(abs: &Path, base: &Path) -> PathBuf {
         .map_or_else(|| PathBuf::from("__unnamed"), PathBuf::from)
 }
 
-/// The extension a component's shadow carries: `.tsx` for a `lang="ts"`
-/// component, `.jsx` for a JavaScript one.
+/// The extension of a `lang="ts"` component's shadow: `Foo.svelte` becomes
+/// `Foo.svelte.shadow.ts`.
+///
+/// svelte2tsx's `ts` mode emits plain TypeScript, not JSX: markup is lowered to
+/// `svelteHTML.createElement(…)` calls. A `.tsx` file name would still make the
+/// compiler parse it as TSX, where a generic arrow function (`<T>(x: T) => x`) or
+/// an angle-bracket assertion (`<number>value`) in the component's script is read
+/// as JSX and rejected, and `.mts`/`.cts` reject the generic arrow too. Only a
+/// plain `.ts` name parses both. It cannot be `Foo.svelte.ts`: that is also the
+/// name of a real companion rune module, and `Foo.svelte.d.ts` would be its
+/// declaration counterpart. The extra segment keeps the name unique; importers
+/// reach the shadow through the `.svelte.d.ts` twin and `.d.svelte.ts` bridge,
+/// which re-export it by its full name.
+const TS_SHADOW_EXTENSION: &str = ".shadow.ts";
+
+/// The extension a component's shadow carries: [`TS_SHADOW_EXTENSION`] for a
+/// `lang="ts"` component, `.jsx` for a JavaScript one.
 ///
 /// TypeScript honours `JSDoc` type annotations **only in JS files**, so a
 /// JS-authored component emitted as `.tsx` has every `/** @type {...} */` in
@@ -1742,14 +1757,18 @@ fn safe_relative(abs: &Path, base: &Path) -> PathBuf {
 /// Falls back to `.tsx` for an unreadable source, which is what the caller
 /// would have produced anyway.
 fn shadow_extension(source_path: &Path) -> &'static str {
-    fs::read_to_string(source_path).map_or(".tsx", |source| {
+    fs::read_to_string(source_path).map_or(TS_SHADOW_EXTENSION, |source| {
         shadow_extension_for(is_typescript_component(&source))
     })
 }
 
 /// The same decision made from an already-classified source.
 const fn shadow_extension_for(is_ts_file: bool) -> &'static str {
-    if is_ts_file { ".tsx" } else { ".jsx" }
+    if is_ts_file {
+        TS_SHADOW_EXTENSION
+    } else {
+        ".jsx"
+    }
 }
 
 /// Delete the shadow (and its source map) this component would have had under
@@ -1765,10 +1784,15 @@ fn remove_stale_counterpart(shadow: &Path, ext: &str) {
     else {
         return;
     };
-    let other = if ext == ".tsx" { ".jsx" } else { ".tsx" };
-    let counterpart = PathBuf::from(format!("{stem}{other}"));
-    let _ = fs::remove_file(&counterpart);
-    let _ = fs::remove_file(append_extension(&counterpart, ".map"));
+    // `.tsx` is what older caches wrote for a `lang="ts"` component.
+    for other in [TS_SHADOW_EXTENSION, ".jsx", ".tsx"] {
+        if other == ext {
+            continue;
+        }
+        let counterpart = PathBuf::from(format!("{stem}{other}"));
+        let _ = fs::remove_file(&counterpart);
+        let _ = fs::remove_file(append_extension(&counterpart, ".map"));
+    }
 }
 
 #[allow(
@@ -3323,7 +3347,7 @@ fn prune_orphaned_module_bridges(mirror_dir: &Path, written: &std::collections::
         if written.contains(&bridge) {
             continue;
         }
-        if [".tsx", ".jsx"].iter().any(|ext| {
+        if [TS_SHADOW_EXTENSION, ".jsx", ".tsx"].iter().any(|ext| {
             bridge
                 .with_file_name(format!("{base}.svelte{ext}"))
                 .is_file()
@@ -5341,7 +5365,7 @@ mod tests {
         );
 
         let (ts_shadow, ts_twin) = twin(&ts);
-        assert!(ts_shadow.to_string_lossy().ends_with(".svelte.tsx"));
+        assert!(ts_shadow.to_string_lossy().ends_with(".svelte.shadow.ts"));
         assert!(ts_twin, "a .tsx shadow still needs its CJS-mode twin");
 
         let _ = fs::remove_dir_all(&tmp);
@@ -5498,7 +5522,7 @@ mod tests {
         materialize_overlay_with(&tmp, &files, Some(&tsconfig), false, &[]).unwrap();
 
         let app_tsx =
-            fs::read_to_string(tmp.join(".svelte-check/svelte/src/App.svelte.tsx")).unwrap();
+            fs::read_to_string(tmp.join(".svelte-check/svelte/src/App.svelte.shadow.ts")).unwrap();
         // The `$lib/Button.svelte` alias is gone, replaced by a concrete
         // relative path at Button's shadow `.tsx` (which TS resolves directly,
         // unlike the alias `rootDirs` can't bridge).
@@ -5507,7 +5531,7 @@ mod tests {
             "alias was not rewritten:\n{app_tsx}"
         );
         assert!(
-            app_tsx.contains("Button.svelte.tsx"),
+            app_tsx.contains("Button.svelte.shadow.ts"),
             "rewrite did not point at the shadow:\n{app_tsx}"
         );
 
@@ -5544,13 +5568,13 @@ mod tests {
         materialize_overlay_with(&tmp, &files, Some(&tsconfig), false, &[]).unwrap();
 
         let app_tsx =
-            fs::read_to_string(tmp.join(".svelte-check/svelte/src/App.svelte.tsx")).unwrap();
+            fs::read_to_string(tmp.join(".svelte-check/svelte/src/App.svelte.shadow.ts")).unwrap();
         assert!(
             !app_tsx.contains("#lib/Button.svelte"),
             "the `#lib` subpath import was not rewritten:\n{app_tsx}"
         );
         assert!(
-            app_tsx.contains("Button.svelte.tsx"),
+            app_tsx.contains("Button.svelte.shadow.ts"),
             "rewrite did not point at the shadow:\n{app_tsx}"
         );
 
@@ -5592,15 +5616,16 @@ mod tests {
         let tsconfig = workspace.join("tsconfig.json");
         materialize_overlay_with(&workspace, &files, Some(&tsconfig), false, &[]).unwrap();
 
-        let consumer_tsx =
-            fs::read_to_string(workspace.join(".svelte-check/svelte/src/consumer.svelte.tsx"))
-                .unwrap();
+        let consumer_tsx = fs::read_to_string(
+            workspace.join(".svelte-check/svelte/src/consumer.svelte.shadow.ts"),
+        )
+        .unwrap();
         assert!(
             !consumer_tsx.contains("$libs/components/survey-options.svelte"),
             "cross-package alias was not rewritten:\n{consumer_tsx}"
         );
         assert!(
-            consumer_tsx.contains("survey-options.svelte.tsx"),
+            consumer_tsx.contains("survey-options.svelte.shadow.ts"),
             "rewrite did not point at the external mirror's shadow:\n{consumer_tsx}"
         );
 
@@ -5652,7 +5677,7 @@ mod tests {
             "only the `$libs` sibling should be mirrored, got {mirrored:?}"
         );
         assert!(
-            ext_root.join("0/Shared.svelte.tsx").is_file(),
+            ext_root.join("0/Shared.svelte.shadow.ts").is_file(),
             "the `$libs` sibling (resolved through baseUrl) should have a shadow"
         );
 
@@ -5708,13 +5733,14 @@ mod tests {
         result.unwrap();
 
         let app_tsx =
-            fs::read_to_string(workspace.join(".svelte-check/svelte/src/App.svelte.tsx")).unwrap();
+            fs::read_to_string(workspace.join(".svelte-check/svelte/src/App.svelte.shadow.ts"))
+                .unwrap();
         assert!(
             !app_tsx.contains("$lib/Button.svelte"),
             "alias was not rewritten with a relative --tsconfig path:\n{app_tsx}"
         );
         assert!(
-            app_tsx.contains("Button.svelte.tsx"),
+            app_tsx.contains("Button.svelte.shadow.ts"),
             "rewrite did not point at the shadow:\n{app_tsx}"
         );
 
@@ -5809,7 +5835,7 @@ mod tests {
             result.unwrap();
 
             let field_tsx =
-                fs::read_to_string(workspace.join(".svelte-check/ext/0/Field.svelte.tsx"))
+                fs::read_to_string(workspace.join(".svelte-check/ext/0/Field.svelte.shadow.ts"))
                     .expect("external Field.svelte shadow should have been emitted");
             assert!(
                 !field_tsx.contains("$lib/Input.svelte"),
@@ -5871,8 +5897,9 @@ mod tests {
         std::env::set_current_dir(&cwd).unwrap();
         result.unwrap();
 
-        let field = fs::read_to_string(workspace.join(".svelte-check/ext/0/src/Field.svelte.tsx"))
-            .expect("external Field.svelte shadow should have been emitted");
+        let field =
+            fs::read_to_string(workspace.join(".svelte-check/ext/0/src/Field.svelte.shadow.ts"))
+                .expect("external Field.svelte shadow should have been emitted");
         assert!(
             !field.contains("#u/util.js"),
             "the package's own `#` subpath import was left for the workspace to resolve:\n{field}"
@@ -5930,7 +5957,7 @@ mod tests {
             .as_str()
             .unwrap_or_else(|| panic!("no exact override for $lib/Button.svelte:\n{paths}"));
         assert!(
-            target.ends_with("Button.svelte.tsx"),
+            target.ends_with("Button.svelte.shadow.ts"),
             "override does not point at the shadow: {target}"
         );
 
@@ -5968,7 +5995,7 @@ mod tests {
             .as_str()
             .unwrap_or_else(|| panic!("no exact override for #lib/Button.svelte:\n{paths}"));
         assert!(
-            target.ends_with("Button.svelte.tsx"),
+            target.ends_with("Button.svelte.shadow.ts"),
             "override does not point at the shadow: {target}"
         );
 
@@ -6075,7 +6102,7 @@ mod tests {
             .as_str()
             .unwrap_or_else(|| panic!("no exact override for libs/ui/Card.svelte:\n{paths}"));
         assert!(
-            target.ends_with("Card.svelte.tsx"),
+            target.ends_with("Card.svelte.shadow.ts"),
             "override does not point at the shadow: {target}"
         );
 
@@ -6189,7 +6216,7 @@ mod tests {
             .as_str()
             .unwrap_or_else(|| panic!("no exact override for @/Button.svelte:\n{paths}"));
         assert!(
-            exact.ends_with("Button.svelte.tsx"),
+            exact.ends_with("Button.svelte.shadow.ts"),
             "override does not point at the shadow: {exact}"
         );
 
