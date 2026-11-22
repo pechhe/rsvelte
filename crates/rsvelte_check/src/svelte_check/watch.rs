@@ -10,10 +10,10 @@
 //! overlay step.
 
 use std::path::Path;
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher, recommended_watcher};
+use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 use super::runner::{RunOptions, RunResult, run};
 
@@ -60,9 +60,7 @@ pub fn run_watch(
 ) -> notify::Result<()> {
     let workspace = options.workspace.clone();
     let (tx, rx) = channel::<notify::Result<notify::Event>>();
-    let mut watcher: RecommendedWatcher = recommended_watcher(move |res| {
-        let _ = tx.send(res);
-    })?;
+    let mut watcher = new_watcher(tx)?;
     watcher.watch(&workspace, RecursiveMode::Recursive)?;
 
     // Initial run.
@@ -84,6 +82,23 @@ pub fn run_watch(
         let result = run(options);
         on_run(&result);
     }
+}
+
+/// The watcher behind `run_watch`. It does not follow symlinks: with a
+/// symlinked `node_modules` (Bun's isolated linker, pnpm), workspace packages
+/// link to one another, so a recursive registration that follows links walks
+/// the same directories along a combinatorial number of paths and never
+/// returns, and the initial run never starts (a SvelteKit app in a 140-package
+/// monorepo: more than 5.6 million directories in two minutes). Every file a
+/// rerun reacts to lives under the workspace's own directories; `node_modules`
+/// events are ignored anyway.
+fn new_watcher(tx: Sender<notify::Result<notify::Event>>) -> notify::Result<RecommendedWatcher> {
+    RecommendedWatcher::new(
+        move |res| {
+            let _ = tx.send(res);
+        },
+        Config::default().with_follow_symlinks(false),
+    )
 }
 
 /// Block until at least one relevant change has arrived, then drain
@@ -199,5 +214,51 @@ mod tests {
         // Random non-source extensions ignored.
         assert!(!path_is_relevant(&ws.join("README.md"), &ws));
         assert!(!path_is_relevant(&ws.join("a.png"), &ws));
+    }
+
+    /// Nine packages whose `node_modules` link to each other, as a symlinked
+    /// monorepo does. Following the links walks about a million paths.
+    #[cfg(unix)]
+    #[test]
+    fn recursive_watch_does_not_walk_a_symlinked_package_graph() {
+        let root = std::env::temp_dir().join(format!(
+            "rsvelte-watch-package-graph-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let packages: Vec<PathBuf> = (0..9)
+            .map(|i| root.join("packages").join(format!("p{i}")))
+            .collect();
+        for package in &packages {
+            std::fs::create_dir_all(package.join("node_modules")).unwrap();
+        }
+        for (i, package) in packages.iter().enumerate() {
+            for (j, other) in packages.iter().enumerate() {
+                if i != j {
+                    std::os::unix::fs::symlink(
+                        other,
+                        package.join("node_modules").join(format!("p{j}")),
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        // Register on another thread, so a walk that follows the links fails
+        // this test after the timeout instead of hanging it.
+        let (done_tx, done_rx) = channel();
+        let watched = root.clone();
+        std::thread::spawn(move || {
+            let (tx, _rx) = channel();
+            let mut watcher = new_watcher(tx).unwrap();
+            let result = watcher.watch(&watched, RecursiveMode::Recursive);
+            let _ = done_tx.send(result);
+        });
+        let registered = done_rx.recv_timeout(Duration::from_secs(10));
+        if registered.is_ok() {
+            let _ = std::fs::remove_dir_all(&root);
+        }
+        registered
+            .expect("registering the recursive watch did not finish within 10 s")
+            .unwrap();
     }
 }
